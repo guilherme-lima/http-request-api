@@ -37,16 +37,16 @@ public class DoRequestUC {
     private TokenInfo tokenInfo;
     private LocalDateTime tokenTime;
 
-    public void execute(RequestInfo requestInfo, RequestTokenInfo requestRequestTokenInfo) {
+    public void execute(RequestInfo requestInfo) {
         LocalDateTime startTime = LocalDateTime.now();
         int requestTimes = howManyRequests(requestInfo);
         ForkJoinPool myPool = new ForkJoinPool(requestInfo.getAmountOfTreads());
         try {
             myPool.submit(() -> IntStream.range(0, requestTimes)
-                        .forEach(execTime -> request(requestInfo, requestRequestTokenInfo, execTime)))
+                        .forEach(each -> request(requestInfo, each)))
                   .get();
             log.info("Elapsed time: " +
-                    startTime.until(LocalDateTime.now(), ChronoUnit.SECONDS) * 1000L + " segundos.");
+                    startTime.until(LocalDateTime.now(), ChronoUnit.SECONDS) + " seconds.");
         } catch (InterruptedException e) {
             e.printStackTrace();
         } catch (ExecutionException e) {
@@ -65,12 +65,11 @@ public class DoRequestUC {
     }
 
     private void request(final RequestInfo requestInfo,
-                         final RequestTokenInfo requestRequestTokenInfo,
-                         final Integer execTime) {
-        String url = getRequestUrl(requestInfo, execTime);
+                         final int requestNumber) {
+        String url = getRequestUrl(requestInfo, requestNumber);
         HttpMethod httpMethod = requestInfo.getHttpMethod();
-        HttpHeaders header = getRequestHeader(requestInfo, requestRequestTokenInfo, execTime);
-        String body = getRequestBody(requestInfo, execTime);
+        HttpHeaders header = getRequestHeader(requestInfo, requestNumber);
+        String body = getRequestBody(requestInfo, requestNumber);
 
         HttpEntity<Object> requestEntity = new HttpEntity<>(body, header);
         log.info("Requesting...");
@@ -88,20 +87,20 @@ public class DoRequestUC {
         }
     }
 
-    private String getRequestUrl(final RequestInfo requestInfo, final Integer execTime) {
-        return replaceVariables(requestInfo, execTime, new String[]{requestInfo.getUrl()});
+    private String getRequestUrl(final RequestInfo requestInfo, final int requestNumber) {
+        return replaceVariables(requestInfo, requestNumber, new String[]{requestInfo.getUrl()});
     }
 
     private HttpHeaders getRequestHeader(final RequestInfo requestInfo,
-                                         final RequestTokenInfo requestRequestTokenInfo,
                                          final Integer execTime) {
-        requestInfo.getHeaderElements().forEach((key, value) -> requestInfo.getHeaderElements()
-                .set(key, replaceVariables(requestInfo, execTime, new String[]{String.valueOf(value)})));
+        requestInfo.getHeaderElements()
+                .forEach((key, value) -> requestInfo.getHeaderElements()
+                    .set(key, replaceVariables(requestInfo, execTime, new String[]{String.valueOf(value)})));
 
         HttpHeaders header = new HttpHeaders();
         header.addAll(requestInfo.getHeaderElements());
         if (requestInfo.isTokenNeeded() && newTokenNeeded()) {
-            tokenInfo = getToken(requestRequestTokenInfo);
+            tokenInfo = getToken(requestInfo.getRequestTokenInfo());
             header.set("Authorization", "Bearer " + tokenInfo.getAccess_token());
         }
         return header;
@@ -111,14 +110,14 @@ public class DoRequestUC {
         return replaceVariables(requestInfo, execTime, new String[]{requestInfo.getRequestBody()});
     }
 
-    private String replaceVariables(RequestInfo requestInfo, Integer execTime, String[] url) {
+    private String replaceVariables(RequestInfo requestInfo, int requestNumber, String[] url) {
         requestInfo.getVariables().keySet().forEach(key -> {
             if (url[0].contains(key)) {
                 List<String> varList = requestInfo.getVariables().get(key);
                 if (!CollectionUtils.isEmpty(varList)) {
                     int index;
-                    if (varList.size() > execTime)
-                        index = execTime;
+                    if (varList.size() > requestNumber)
+                        index = requestNumber;
                     else
                         index = varList.size() - 1;
                     url[0] = url[0].replace(key, varList.get(index));
@@ -128,13 +127,13 @@ public class DoRequestUC {
         return url[0];
     }
 
-    private synchronized TokenInfo getToken(final RequestTokenInfo requestRequestTokenInfo) {
+    private synchronized TokenInfo getToken(final RequestTokenInfo requestTokenInfo) {
         log.info("Getting a new token.");
         tokenTime = LocalDateTime.now();
 
-        String url = requestRequestTokenInfo.getAccessTokenUrl();
-        HttpHeaders header = getTokenRequestHeader(requestRequestTokenInfo);
-        MultiValueMap<String, String> body = getTokenRequestBody(requestRequestTokenInfo);
+        String url = requestTokenInfo.getAccessTokenUrl();
+        HttpHeaders header = getTokenRequestHeader(requestTokenInfo);
+        MultiValueMap<String, String> body = getTokenRequestBody(requestTokenInfo);
 
         return getRestTemplate()
                 .postForEntity(url, getRequest(header, body) , TokenInfo.class)
@@ -150,21 +149,21 @@ public class DoRequestUC {
         return new RestTemplate();
     }
 
-    private HttpHeaders getTokenRequestHeader(final RequestTokenInfo requestRequestTokenInfo) {
+    private HttpHeaders getTokenRequestHeader(final RequestTokenInfo requestTokenInfo) {
         HttpHeaders headers = new HttpHeaders();
-        headers.set("Authorization", "Basic " + getBase64Auth(requestRequestTokenInfo));
+        headers.set("Authorization", "Basic " + getBase64Auth(requestTokenInfo));
         return headers;
     }
 
-    private MultiValueMap<String, String> getTokenRequestBody(final RequestTokenInfo requestRequestTokenInfo) {
+    private MultiValueMap<String, String> getTokenRequestBody(final RequestTokenInfo requestTokenInfo) {
         MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
-        body.add("grant_type", requestRequestTokenInfo.getGrantType());
-        body.add("scope", requestRequestTokenInfo.getScope());
+        body.add("grant_type", requestTokenInfo.getGrantType());
+        body.add("scope", requestTokenInfo.getScope());
         return body;
     }
 
-    private String getBase64Auth(final RequestTokenInfo requestRequestTokenInfo) {
-        String auth = requestRequestTokenInfo.getClientId() + ":" + requestRequestTokenInfo.getSecret();
+    private String getBase64Auth(final RequestTokenInfo requestTokenInfo) {
+        String auth = requestTokenInfo.getClientId() + ":" + requestTokenInfo.getSecret();
         return Base64.getEncoder().encodeToString(auth.getBytes());
     }
 
